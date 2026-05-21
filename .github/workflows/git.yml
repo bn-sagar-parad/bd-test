@@ -1,0 +1,56 @@
+name: git-validate
+
+on:
+  pull_request:
+    branches-ignore:
+      - gh-pages
+    types: [opened, synchronize, edited, reopened]
+
+jobs:
+  validate-git:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: setup node 14.x
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14.x'
+
+    - name: Get yarn cache directory path
+      id: yarn-cache-dir-path
+      run: echo "::set-output name=dir::$(yarn cache dir)"
+
+    - uses: actions/cache@v2
+      id: yarn-cache
+      with:
+        path: |
+          ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          ./node_modules/
+        key: ${{ runner.os }}-yarn-${{ hashFiles('./yarn.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-yarn-
+
+    - name: Install Dependencies
+      if: steps.yarn-cache.outputs.cache-hit != 'true'
+      run: yarn
+
+    - name: validate git
+      run: |
+        yarn lint:commits
+      env:
+        CI: true
+        
+    - name: validate pr title
+      uses: aslafy-z/conventional-pr-title-action@v2.2.0
+      with:
+        success-state: Title follows the specification.
+        failure-state: Title does not follow the specification.
+        context-name: conventional-pr-title
+        preset: '@commitlint/config-conventional@latest'
+      env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,112 @@
+{
+  "name": "react-dropdown-now",
+  "version": "6.0.1",
+  "description": "React dropdown component NOW",
+  "main": "dist/index.js",
+  "module": "dist/index.es.js",
+  "style": "style.css",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/iambumblehead/react-dropdown-now.git"
+  },
+  "contributors": [
+    {
+      "name": "chris",
+      "email": "chris@bumblehead.com"
+    }
+  ],
+  "files": [
+    "dist/*",
+    "index.d.ts",
+    "style.css"
+  ],
+  "keywords": [
+    "react",
+    "react-component",
+    "component",
+    "dropdown",
+    "select"
+  ],
+  "author": {
+    "name": "Fraser Xu",
+    "email": "xvfeng123@gmail.com",
+    "url": "https://fraserxu.me"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/iambumblehead/react-dropdown-now/issues"
+  },
+  "homepage": "https://iambumblehead.github.io/react-dropdown-now/",
+  "dependencies": {
+    "classnames": "^2.3.1",
+    "lodash": "^4.17.21"
+  },
+  "peerDependencies": {
+    "react": ">=16.8",
+    "react-dom": ">=16.8"
+  },
+  "devDependencies": {
+    "@babel/cli": "7.15.7",
+    "@babel/core": "^7.15.8",
+    "@babel/parser": "^7.15.8",
+    "@commitlint/cli": "^13.2.1",
+    "@commitlint/config-conventional": "^13.2.0",
+    "@rollup/plugin-commonjs": "^21.0.0",
+    "@rollup/plugin-node-resolve": "^13.0.6",
+    "@storybook/addon-actions": "^6.3.12",
+    "@storybook/addon-console": "^1.2.3",
+    "@storybook/addon-essentials": "^6.3.12",
+    "@storybook/addon-links": "^6.3.12",
+    "@storybook/react": "^6.3.12",
+    "@testing-library/jest-dom": "^5.14.1",
+    "@testing-library/react": "^12.1.2",
+    "@types/jest": "^27.0.2",
+    "@types/node": "^16.11.1",
+    "@types/testing-library__jest-dom": "^5.14.1",
+    "@typescript-eslint/eslint-plugin": "^5.1.0",
+    "@typescript-eslint/parser": "^5.1.0",
+    "babel-loader": "^8.2.2",
+    "core-js": "^3.18.3",
+    "eslint": "^7.32.0",
+    "eslint-config-airbnb": "^18.2.1",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-import": "^2.25.2",
+    "eslint-plugin-jest": "^25.2.2",
+    "eslint-plugin-jsx-a11y": "^6.4.1",
+    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-react": "^7.26.1",
+    "eslint-plugin-react-hooks": "^4.2.0",
+    "fork-ts-checker-webpack-plugin": "^6.3.6",
+    "husky": "^7.0.2",
+    "jest": "^27.3.1",
+    "prettier": "^2.4.1",
+    "react": "^17.0.2",
+    "react-custom-scroll": "^4.3.0",
+    "react-dom": "^17.0.2",
+    "react-is": "^17.0.2",
+    "rollup": "^2.58.0",
+    "rollup-plugin-peer-deps-external": "^2.2.4",
+    "rollup-plugin-typescript2": "^0.30.0",
+    "ts-jest": "^27.0.7",
+    "ts-loader": "^9.2.6",
+    "typescript": "^4.4.4"
+  },
+  "scripts": {
+    "lint:commits": "commitlint --from origin/master --to HEAD",
+    "jest": "jest --config=./.jest/jest.config.js",
+    "jest:watch": "npm run jest -- --watch",
+    "unit-test": "NODE_ENV=test npm run jest",
+    "test": "npm run lint && npm run unit-test",
+    "prepublishOnly": "npm run build",
+    "publish": "git push origin --tags && git push origin",
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public",
+    "start": "npm run storybook",
+    "storybook": "start-storybook -p 6006",
+    "build-storybook": "build-storybook -o docs",
+    "build": "rollup -c",
+    "lint": "eslint 'src/**/*.{js,ts,tsx}' --quiet --fix",
+    "prepare": "husky install"
+  }
+}
