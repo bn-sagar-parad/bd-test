@@ -1,0 +1,210 @@
+include:
+  - project: 'blackduck-inc/black-duck-security-scan'
+    ref: 'v2.0.0'
+    file: 'templates/security_scan.yml'
+
+
+# Polaris Scan and Report job specific variables defined here (common ones go in common/mp-common-variables.yml)
+variables:
+  POLARIS_PROJECT_VERSION: "test" # Default Project Version
+  CATO_RELEASE_VERSION: ""          # Default Cato Release Version - if Left "" then its undefined
+  POLARIS_PROJECT_NAME: "MovementPlanner_${CI_PROJECT_PATH_SLUG}"
+
+Polaris: # Run static code analysis on your source code
+  stage: build_image_and_security_scans
+  tags:
+    - ${GITLAB_HEAVY_RUNNER_TAG}
+  needs:
+    - job: Set_Version
+      optional: true
+  #dependencies: [] # Empty Dependencies says that we are not dependent on any other jobs, don't download artifacts
+  image: ${POLARIS_IMAGE}
+  before_script:
+    - |
+      # Check if project is in POLARIS_FILE_EXCEPTIONS.
+      # - IN list, use the local polaris.yml already present in the project (no download, no replace)
+      # - NOT in list, always delete any existing polaris.yml and download the centralized polaris_java.yml from makefiles
+      USES_LOCAL_POLARIS=false
+      for project in ${POLARIS_FILE_EXCEPTIONS}; do
+        if [[ "$CI_PROJECT_NAME" == "$project" ]]; then
+          USES_LOCAL_POLARIS=true
+          break
+        fi
+      done
+
+      if [[ "$USES_LOCAL_POLARIS" == "false" ]]; then
+        # Project is NOT in POLARIS_FILE_EXCEPTIONS - always use the centralized polaris_java.yml from makefiles
+        # Delete any existing polaris.yml (local or otherwise) to ensure the centralized version is used
+        echo "INFO: using CENTRALIZED polaris.yml - Project '${CI_PROJECT_NAME}' is NOT in POLARIS_FILE_EXCEPTIONS"
+        if [ -f "polaris.yml" ]; then
+          rm polaris.yml
+        fi
+        # Download centralized polaris_java.yml and rename it to polaris.yml
+        wget ${POLARIS_FILE}
+        if [ -f "polaris_java.yml" ]; then
+          mv polaris_java.yml polaris.yml
+        else
+          echo "No Polaris file found to process."
+          exit 1
+        fi
+        # Replace the placeholder project name with the actual project slug
+        sed -i "s|ReplaceMe|${CI_PROJECT_PATH_SLUG}|g" polaris.yml
+        cat polaris.yml
+      else
+        # Project IS in POLARIS_FILE_EXCEPTIONS - use the local polaris.yml as-is, no changes made
+        echo "INFO: using LOCAL polaris.yml from the project repository - Project '${CI_PROJECT_NAME}' IS in POLARIS_FILE_EXCEPTIONS"
+      fi
+
+      # Handle Setting CATO Version
+      if [[ "$IS_SNAPSHOT" == "true" ]]; then
+        echo "-SNAPSHOT Version Detected, Utilizing Default Project Version for Scan"
+      
+      # If mainline flow and CATO_RELEASE VERSION isn't defined, then use VERSION as the CATO_RELEASE_VERSION
+      elif [[ "$MAINLINE_TRIGGER" == "true" ]] && [[ "$CATO_RELEASE_VERSION" == "" ]]; then
+        POLARIS_PROJECT_VERSION="CATO_${VERSION}"
+      
+      # If CATO_RELEASE_VERSION is user defined
+      # Note - This would occur when the user would manually define the CATO_RELEASE_VERSION in the proj .gitlab-ci.yml
+      elif [[ "$CATO_RELEASE_VERSION" != "" ]]; then
+        POLARIS_PROJECT_VERSION="CATO_${CATO_RELEASE_VERSION}"
+
+      # Neither Version nor CATO_RELEASE_VERSION are defined
+      # Note - This would occur during merge request flows or alternative trigger conditions 
+       #else 
+       #  POLARIS_PROJECT_VERSION="test" # Commented out as this is already defined as a default value
+      fi
+
+      # Ensures that SPECIAL_RELEASE_BRANCH variables sets VERSION directly (no CATO_ prefix)
+      if [ "$CI_COMMIT_BRANCH" == "$SPECIAL_RELEASE_BRANCH" ]; then
+        POLARIS_PROJECT_VERSION="$VERSION"
+      fi
+      
+      # Print some Vars for Info / Debugging 
+      echo "VERSION=${VERSION}" 
+      echo "POLARIS_PROJECT_VERSION=${POLARIS_PROJECT_VERSION}" | tee polaris.env
+      echo "CATO_RELEASE_VERSION=${CATO_RELEASE_VERSION}"
+      echo "POLARIS_IMAGE=${POLARIS_IMAGE}"
+      echo "USES_LOCAL_POLARIS=${USES_LOCAL_POLARIS}"
+      
+      # Initial Maven Setup 
+      mkdir -p ${HOME}/.m2
+      ln -sf ${MAVEN_SETTINGS_XML} ${HOME}/.m2/settings.xml
+      # Remove setting, if it exists 
+      sed -i -e 's;<activeProfile>check-if-remote-artifact-exists</activeProfile>;;' ${MAVEN_SETTINGS_XML}
+      
+      # Run a pre-check to ensure polaris.yml contains the correct project name 
+      if [ -f polaris.yml ]
+      then
+         if ! grep -q "name: MovementPlanner_${CI_PROJECT_PATH_SLUG}" polaris.yml
+         then
+            echo "polaris.yml does not contain project name MovementPlanner_${CI_PROJECT_PATH_SLUG}"
+            exit 1
+         fi
+      else
+         echo "polaris.yml does not exist for project ${CI_PROJECT_NAME}"
+         exit 1
+      fi
+
+  script:
+    - |
+      #Init git config 
+      git config --global --add safe.directory ${CI_PROJECT_DIR}
+      
+      # Remove polaris files, if they exist 
+      if [ -f "polaris_cli-linux64.zip" ]; then
+        rm "polaris_cli-linux64.zip"
+        rm -rf "polaris"
+        echo "File polaris_cli-linux64.zip and polaris has been deleted"
+      fi
+      
+      wget --quiet https://wabtec.cop.blackduck.com/api/tools/polaris_cli-linux64.zip --output-document=/tmp/polaris_cli-linux64.zip
+      unzip /tmp/polaris_cli-linux64.zip -d /tmp
+      export POLARIS=$( find /tmp/ -name polaris -type f )
+      ${POLARIS} --co project.branch=${POLARIS_PROJECT_VERSION} analyze -w
+
+
+  artifacts:
+    reports:
+      dotenv: polaris.env
+    name: "${CI_PROJECT_PATH_SLUG}-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_ID}-${CI_JOB_STAGE}"
+    when: always
+    paths:
+       - .polaris-coverity.zip
+       - target/polaris-custom-report
+       - "**/cli-scan.json"
+       - "**/build-log.txt"
+    expire_in: 2 week
+  retry:
+    max: 1
+    when:
+      - runner_system_failure
+      - api_failure
+      - unknown_failure
+  rules:
+    # EAP8 Security Scan Rule - triggered from security-scans schedule on SPECIAL_RELEASE_BRANCH variable
+    - if: '$EAP8_SECURITY_SCAN == "TRUE" && $CI_COMMIT_BRANCH == $SPECIAL_RELEASE_BRANCH'
+      when: always
+    # Use unified template for MR and Mainline flows with independent enable/disable controls
+    - !reference [ .security_scan_unified_condition_template, rules ]
+    # Alternate Job Trigger Conditions
+    - if: '$SECURITY_SCANS_FORCE_RUN =~ /true/i && $CATO_RELEASE_VERSION != ""'
+    - if: '$CI_COMMIT_BRANCH =~ /.*-polaris$|.*-synopsys$/' # Trigger job with specific branch names (for test only)
+
+
+ # Generate report and publish to GitLab registry
+Polaris_Report: # Run static code analysis on your source code
+  stage: security_report
+  tags:
+    - ${GITLAB_HEAVY_RUNNER_TAG}
+  image: ${DEFAULT_POLARIS_REPORTING_IMAGE}
+
+  before_script:
+    - |
+      # Print some Vars for Info / Debugging 
+      echo "VERSION=${VERSION}" 
+      echo "POLARIS_PROJECT_VERSION=${POLARIS_PROJECT_VERSION}"
+      echo "CATO_RELEASE_VERSION=${CATO_RELEASE_VERSION}"
+      echo "POLARIS_IMAGE=${POLARIS_IMAGE}"
+
+  script:
+    - BUILD_DIR=$( pwd )
+    - cd /tools
+    - REPORT_CMD="python3 genReport.py --project ${POLARIS_PROJECT_NAME} --branch ${POLARIS_PROJECT_VERSION} --prefix polaris --pdf"
+    - echo "REPORT_CMD=${REPORT_CMD}"
+    - $REPORT_CMD || $REPORT_CMD --debug 5 # Execute the Report Command, if it fails, then execute it again with additional arg: --debug 5
+    - cp polaris.pdf ${BUILD_DIR}/${CI_PROJECT_PATH_SLUG}-${POLARIS_PROJECT_VERSION}-polaris.pdf
+    # Below commands need to be reevaluated when cleaning up and optimizing job
+    # - cp -Rv /tools/$DIRECTORY/$FILE_NAME.* $CI_PROJECT_DIR/$CI_PROJECT_NAME-polaris-$VERSION.pdf
+    # - 'curl --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file $CI_PROJECT_DIR/$CI_PROJECT_NAME-polaris-$VERSION.pdf  "${CI_API_V4_URL}/projects/17223/packages/generic/polaris_reports_${CI_PROJECT_NAME}_${VERSION}/${VERSION}/$CI_PROJECT_NAME-polaris-$VERSION.pdf"'
+  artifacts:
+    name: "${CI_PROJECT_PATH_SLUG}-${CI_COMMIT_REF_SLUG}-${CI_PIPELINE_ID}-${CI_JOB_STAGE}"
+    when: always
+    paths:
+      - ./*polaris.pdf
+    expire_in: 2 week
+  retry:
+    max: 1
+    when:
+      - runner_system_failure
+      - api_failure
+      - unknown_failure
+  rules:
+    # EAP8 Security Scan Rule - triggered from security-scans schedule on SPECIAL_RELEASE_BRANCH variable
+    - if: '$EAP8_SECURITY_SCAN == "TRUE" && $CI_COMMIT_BRANCH == $SPECIAL_RELEASE_BRANCH'
+      when: always
+      allow_failure: true
+    # Use unified template for MR and Mainline flows with independent enable/disable controls
+    - !reference [ .security_scan_unified_condition_template, rules ]
+    # Alternate Job Trigger Conditions
+    - if: '$SECURITY_SCANS_FORCE_RUN =~ /true/i && $CATO_RELEASE_VERSION != ""'
+    - if: '$CI_COMMIT_BRANCH =~ /.*-polaris$|.*-synopsys$/' # Trigger job with specific branch names (for test only)
+
+black-duck-polaris-scan:
+  stage: security
+  extends: .run-black-duck-tools
+  variables:
+    BRIDGE_POLARIS_SERVERURL: $POLARIS_SERVER_URL
+    BRIDGE_POLARIS_ACCESSTOKEN: $POLARIS_ACCESS_TOKEN
+    BRIDGE_POLARIS_ASSESSMENT_TYPES: "SAST,SCA"
+    BRIDGE_POLARIS_APPLICATION_NAME: $CI_PROJECT_NAME
+    BRIDGE_POLARIS_PROJECT_NAME: $CI_PROJECT_NAME
