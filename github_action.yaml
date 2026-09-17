@@ -1,0 +1,115 @@
+# example workflow for Coverity on Polaris
+name: coverity-on-polaris
+
+on:
+  workflow_dispatch:
+
+jobs:
+  maven-build-test:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+          cache: maven
+
+      - name: Run Maven Build
+        run: mvn clean install -DskipTests
+
+  create-polaris-config:
+    runs-on: [self-hosted, linux, x64]
+    needs: maven-build-test
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create polaris.yml
+        run: |
+          POLARIS_REVISION_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat << EOF > polaris.yml
+          version: "1"
+          project:
+            name: richrodz-s/mock-http-svr
+            branch: \${scm.git.branch}
+            revision:
+              name: ${GITHUB_SHA}
+              date: ${POLARIS_REVISION_DATE}
+          capture:
+            build:
+              clean-command: mvn clean
+              build-command: mvn clean compile -DskipTests
+          analyze:
+            mode: central
+            coverity:
+              cov-analyze: [
+                "--aggressiveness-level", "high",
+                "--all",
+                "--concurrency",
+                "--enable-audit-mode",
+                "--enable-constraint-fpp",
+                "--enable", "HARDCODED_CREDENTIALS",
+                "--enable", "ORM_LOST_UPDATE",
+                "--security",
+                "--webapp-security"
+              ]
+          install:
+            coverity:
+              version: default
+          serverUrl: https://csprod.cop.blackduck.com
+          EOF
+      - name: Verify file
+        run: |
+          echo "=== polaris.yml ==="
+          cat polaris.yml
+      - name: Upload config artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: polaris-config
+          path: polaris.yml
+
+  coverity-on-polaris:
+    runs-on: [self-hosted, linux, x64]
+    needs: create-polaris-config
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Download polaris.yml
+        uses: actions/download-artifact@v4
+        with:
+          name: polaris-config
+          path: .
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+          cache: maven
+
+      - name: Polaris Scan
+        env:
+          POLARIS_SERVER_URL: https://csprod.cop.blackduck.com
+          POLARIS_ACCESS_TOKEN: xxxxxxxxxxxxxx
+        run: |
+          ls -l
+          cat polaris.yml
+          curl -fLsS -o polaris.zip "$POLARIS_SERVER_URL/api/tools/polaris_cli-linux64.zip"
+          unzip -d "$RUNNER_TEMP" -jo polaris.zip
+          rm -f polaris.zip
+          "$RUNNER_TEMP/polaris" analyze -w
+#    - name: Save Logs
+#      if: always()
+#      uses: actions/upload-artifact@v4
+#      with:
+#        name: polaris-cli-logs
+#        path: ${{ github.workspace }}/.blackduck
