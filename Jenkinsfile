@@ -6,6 +6,30 @@ pipeline {
  
     stages {
  
+        stage('Create coverity.yaml') {
+            steps {
+                writeFile file: 'coverity.yaml', text: '''capture:
+  build:
+    clean-command: 'gradle -b build.gradle --no-daemon clean'
+    build-command: 'gradle -b build.gradle --no-daemon build'
+  files:
+    exclude-regex: '(node_modules|bower_components|vendor)'
+analyze:
+  cov-analyze-args:
+    - '--aggressiveness-level'
+    - 'high'
+    - '--all'
+    - '--rule'
+    - '--security'
+    - '--webapp-security'
+    - '--webapp-security-aggressiveness-level'
+    - 'high'
+    - '--distrust-all'
+    - '--enable-audit-mode'
+'''
+            }
+        }
+
         stage('Checkout') {
             steps {
                 git branch: 'master',
